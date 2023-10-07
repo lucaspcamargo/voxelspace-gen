@@ -9,23 +9,63 @@
 static void handleInput();
 static void joyEvent(u16 joy, u16 changed, u16 state);
 
+static void heightAdjust();
 static void drawView();
+
+#define HEIGHT_OFFSET 22
+#define HEIGHT_DIV_SHIFT 2
+#define HEIGHT_SCALE 100
 
 fix32 px = FIX32(512);
 fix32 py = FIX32(512);
 u16 phi = 0;
-fix32 height = FIX32(50);
-fix32 horizon = FIX32(40);
-fix32 scale_height = FIX32(100);
-fix32 distance = FIX32(200);
+u16 height = HEIGHT_OFFSET;
+fix32 horizon = FIX32(50);
 static const u16 screen_width = BMP_WIDTH;
 static const u16 screen_height = BMP_HEIGHT;
 static const fix32 screen_width_inv = FIX32(1.0 / (BMP_WIDTH));
 
+#define Z_INITIAL FIX32(1.0)
+#define Z_STEP_INITIAL FIX32(0.5)
+#define Z_STEP_INCR FIX32(0.4)
+#define Z_MAX FIX32(220.0)
+//#define Z_COUNT_MAX 32
+const fix32 *z_values = ((const fix32 *) z_values_bin);
+const s16 *div_z_values = ((const s16 *) div_z_values_bin);
+u8 z_count;
 
 int main(bool hard)
 {
     char col;
+
+    // init z div table
+    /*  NOW PRECOMPUTED :)
+    u8 i;
+    fix32 z = Z_INITIAL;
+    fix32 z_step = Z_STEP_INITIAL;
+    for(i = 0; (i < Z_COUNT_MAX) && (z < Z_MAX); i++)
+    {
+        z_values[i] = z;
+        z += z_step;
+        z_step += Z_STEP_INCR;
+        for(u16 h = 0; h < (256 >> (HEIGHT_DIV_SHIFT-1)); h++)
+        {
+            // min height is HEIGHT_OFFSET
+            // max height is 255 + HEIGHT_OFFSET
+            // min heightmap is 0
+            // max heightmap is 255
+            // original value to divide by z is height - heightmap
+            // so values range from -(255-height_offset) to 255+HEIGHT_OFFSET
+            // so from -255 to 255 is the range, if we factor out HEIGHT_OFFSET being added
+            // let's use -256 as the minimum for optimization
+            div_z_values[ i*Z_COUNT_MAX + h ] = fix32Div(  intToFix32(-256 + HEIGHT_OFFSET + (h << HEIGHT_DIV_SHIFT)), z );
+        }
+    }
+    z_count = i;
+    */
+
+    z_count = sizeof(z_values_bin)/sizeof(fix32);
+    heightAdjust();
 
     JOY_setEventHandler(joyEvent);
 
@@ -52,22 +92,9 @@ int main(bool hard)
         // ensure previous flip buffer request has been started
         BMP_waitWhileFlipRequestPending();
 
-        // can now draw text
+        // draw everything
         BMP_showFPS(1);
-
-        // display particul number
-        // intToStr(numpartic, str, 1);
-        // BMP_clearText(1, 3, 4);
-        // BMP_drawText(str, 1, 3);
-
-        // display gravity
-        // fix16ToStr(gravity, str, 3);
-        // BMP_clearText(1, 4, 5);
-        // BMP_drawText(str, 1, 4);
-
-        // clear bitmap
         BMP_clear();
-        // draw particules
         drawView();
 
         // swap buffer
@@ -85,8 +112,8 @@ static void heightAdjust()
     while(idx_y < 0)
         idx_y += 1024;
     idx_y %= 1024;
-    fix32 heightmap = intToFix32(depth.pixel_data[depth.bytes_per_pixel*(depth.width*idx_y + idx_x)]);
-    height = heightmap + FIX32(30);
+    s16 heightmap = depth_bin[1024*idx_y + idx_x];
+    height = heightmap + HEIGHT_OFFSET;
 }
 
 static void handleInput()
@@ -174,17 +201,17 @@ static void drawView()
     fix32 sinphi = sinFix32(adjphi);
     fix32 cosphi = cosFix32(adjphi);
 
-    fix32 ybuffer[screen_width];
+    s16 ybuffer[screen_width];
     for(u16 i = 0; i < screen_width; i++)
-        ybuffer[i] = FIX32(screen_height);
+        ybuffer[i] = screen_height;
 
 
     // Draw from front to the back (low z coordinate to high z coordinate)
-    fix32 dz = FIX32(0.5);
-    fix32 z = FIX32(1);
-
-    while (z < distance)
+    u8 zidx = 0;
+    while (zidx < z_count)
     {
+        const fix32 z = z_values[zidx];
+
         // Find line on map. This calculation corresponds to a field of view of 90°
         fix32 pleft_x = fix32Sub(fix32Neg(fix32Mul(cosphi, z)), fix32Mul(sinphi,z)) + px;
         fix32 pleft_y = fix32Sub( fix32Mul(sinphi, z), fix32Mul(cosphi, z)) + py;
@@ -192,8 +219,10 @@ static void drawView()
         fix32 pright_y = fix32Sub(fix32Neg(fix32Mul(sinphi, z)), fix32Mul(cosphi, z)) + py;
 
         // segment the line
-        fix32 dx = fix32Div(fix32Sub(pright_x, pleft_x)*2, FIX32(screen_width));
-        fix32 dy = fix32Div(fix32Sub(pright_y, pleft_y)*2, FIX32(screen_width));
+        //fix32 dx = fix32Div(fix32Sub(pright_x, pleft_x)*2, FIX32(screen_width));
+        //fix32 dy = fix32Div(fix32Sub(pright_y, pleft_y)*2, FIX32(screen_width));
+        fix32 dx = fix32Sub(pright_x, pleft_x) >> 7;
+        fix32 dy = fix32Sub(pright_y, pleft_y) >> 7;
 
         //Raster line and draw a vertical line for each segment
         for (u16 i = 0; i < screen_width; i+=2)
@@ -206,8 +235,15 @@ static void drawView()
             while(idx_y < 0)
                 idx_y += 1024;
             idx_y %= 1024;
-            fix32 heightmap = intToFix32(depth.pixel_data[depth.bytes_per_pixel*(depth.width*idx_y + idx_x)]);
-            fix32 height_on_screen = fix32Mul( fix32Div( fix32Sub(height, heightmap) , z ), scale_height) + horizon;
+            s16 heightmap = depth_bin[1024*idx_y + idx_x];
+
+            // without div table
+            // s16 height_on_screen = fix32ToInt( fix32Mul( fix32Div( intToFix32(((s16)height) - heightmap) , z ), FIX32(HEIGHT_SCALE)) + horizon );
+
+            // with div table
+            s16 rel_height = ((s16)height) - HEIGHT_OFFSET - heightmap; // ranges from -255 to 255
+            u16 value_idx = (zidx * (512>>HEIGHT_DIV_SHIFT)) + ((rel_height + 256) >> HEIGHT_DIV_SHIFT);
+            s16 height_on_screen = div_z_values[value_idx];
 
             if(height_on_screen < 0)
                 height_on_screen = 0;
@@ -215,8 +251,8 @@ static void drawView()
             if (height_on_screen < ybuffer[i])
             {
                 u8 color = bmp_color.image[512 * idx_y + (idx_x/2)];
-                u16 start_y = fix32ToInt(height_on_screen);
-                u16 end_y = fix32ToInt(ybuffer[i]);
+                const u16 start_y = height_on_screen;
+                const u16 end_y = ybuffer[i];
                 u8 * coladdr = BMP_getWritePointer(i, start_y);
                 for(u16 curr_y = start_y; curr_y < end_y; curr_y++)
                 {
@@ -231,8 +267,6 @@ static void drawView()
             pleft_y += dy;
         }
 
-        // Go to next line and increase step size when you are far away
-        z += dz;
-        dz += FIX32(0.75);
+        zidx ++;
     }
 }
