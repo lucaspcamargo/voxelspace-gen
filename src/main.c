@@ -1,11 +1,6 @@
 #include "genesis.h"
 #include "resources.h"
 
-#define guint u16
-#define guint8 u8
-#include "depth.h"
-
-
 static void handleInput();
 static void joyEvent(u16 joy, u16 changed, u16 state);
 
