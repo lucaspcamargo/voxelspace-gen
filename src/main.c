@@ -77,6 +77,8 @@ int main(bool hard)
     PAL_setColor(0, bmp_color.palette->data[0]);
     PAL_setPalette(PAL1, bmp_color.palette->data, DMA);
 
+    XGM_startPlay(bgm);
+
     /* Do main job here */
     while(1)
     {
@@ -216,11 +218,11 @@ static void drawView()
         // segment the line
         //fix32 dx = fix32Div(fix32Sub(pright_x, pleft_x)*2, FIX32(screen_width));
         //fix32 dy = fix32Div(fix32Sub(pright_y, pleft_y)*2, FIX32(screen_width));
-        fix32 dx = fix32Sub(pright_x, pleft_x) >> 7;
-        fix32 dy = fix32Sub(pright_y, pleft_y) >> 7;
+        fix32 dx = fix32Sub(pright_x, pleft_x) >> 6;  // optimized
+        fix32 dy = fix32Sub(pright_y, pleft_y) >> 6;  // optimized
 
         //Raster line and draw a vertical line for each segment
-        for (u16 i = 0; i < screen_width; i+=2)
+        for (u16 i = 0; i < screen_width; i+=4)
         {
             s16 idx_x = fix32ToInt(pleft_x);
             while(idx_x < 0)
@@ -252,6 +254,7 @@ static void drawView()
                 for(u16 curr_y = start_y; curr_y < end_y; curr_y++)
                 {
                     *coladdr = color;
+                    *(coladdr+1) = color;
                     color = (color >> 4) + ((color & 0xf) << 4);
                     coladdr += BMP_PITCH;
                 }
