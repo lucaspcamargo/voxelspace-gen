@@ -1,0 +1,20 @@
+#project and scratch files
+.kdev4
+**.kdev4
+*.kate-swp
+
+# sgdk output
+ci-build/
+out/
+
+# masrsdev output
+address.log
+symbol.txt
+out.bin
+
+# personal files
+doc/refs
+
+res/resources.h
+
+src/boot
