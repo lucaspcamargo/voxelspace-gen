@@ -18,3 +18,5 @@ doc/refs
 res/resources.h
 
 src/boot
+.vscode/
+*.bat
