@@ -8,7 +8,7 @@ static void heightAdjust();
 static void drawView();
 
 #define HEIGHT_OFFSET 22
-#define HEIGHT_DIV_SHIFT 2
+#define HEIGHT_DIV_SHIFT 1
 #define HEIGHT_SCALE 100
 
 fix32 px = FIX32(512);
