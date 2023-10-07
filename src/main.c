@@ -16,6 +16,8 @@ fix32 py = FIX32(512);
 u16 phi = 0;
 fix32 height = FIX32(50);
 fix32 horizon = FIX32(40);
+fix32 scale_height = FIX32(100);
+fix32 distance = FIX32(200);
 static const u16 screen_width = BMP_WIDTH;
 static const u16 screen_height = BMP_HEIGHT;
 static const fix32 screen_width_inv = FIX32(1.0 / (BMP_WIDTH));
@@ -167,8 +169,6 @@ static void joyEvent(u16 joy, u16 changed, u16 state)
 
 static void drawView()
 {
-    fix32 scale_height = FIX32(100);
-    fix32 distance = FIX32(200);
 
     u16 adjphi = (phi + 256 + 512)%1024;
     fix32 sinphi = sinFix32(adjphi);
