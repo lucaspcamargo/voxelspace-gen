@@ -16,6 +16,9 @@ fix32 py = FIX32(512);
 u16 phi = 0;
 fix32 height = FIX32(50);
 fix32 horizon = FIX32(60);
+static const u16 screen_width = BMP_WIDTH;
+static const u16 screen_height = BMP_HEIGHT;
+static const fix32 screen_width_inv = FIX32(1.0 / (BMP_WIDTH));
 
 
 int main(bool hard)
@@ -92,22 +95,22 @@ static void handleInput()
             fix32 sinphi = sinFix32(phi);
             fix32 cosphi = cosFix32(phi);
             px += fix32Mul(FIX32(10), cosphi);
-            py += fix32Mul(FIX32(10), sinphi);
+            py -= fix32Mul(FIX32(10), sinphi);
         }
         if (value & BUTTON_DOWN)
         {
             fix32 sinphi = sinFix32(phi);
             fix32 cosphi = cosFix32(phi);
             px -= fix32Mul(FIX32(10), cosphi);
-            py -= fix32Mul(FIX32(10), sinphi);
+            py += fix32Mul(FIX32(10), sinphi);
         }
         if (value & BUTTON_LEFT)
         {
-            phi = (phi+10) % 1024;
+            phi = (phi+20) % 1024;
         }
         if (value & BUTTON_RIGHT)
         {
-            phi = (phi+1024-10) % 1024;
+            phi = (phi+1024-20) % 1024;
         }
     }
 }
@@ -148,10 +151,8 @@ static void joyEvent(u16 joy, u16 changed, u16 state)
 
 static void drawView()
 {
-    fix32 scale_height = FIX32(120);
-    fix32 distance = FIX32(300);
-    static const u16 screen_width = BMP_WIDTH;
-    static const u16 screen_height = BMP_HEIGHT;
+    fix32 scale_height = FIX32(100);
+    fix32 distance = FIX32(200);
 
     fix32 sinphi = sinFix32(phi);
     fix32 cosphi = cosFix32(phi);
@@ -162,7 +163,7 @@ static void drawView()
 
 
     // Draw from front to the back (low z coordinate to high z coordinate)
-    fix32 dz = FIX32(1);
+    fix32 dz = FIX32(0.5);
     fix32 z = FIX32(1);
 
     while (z < distance)
@@ -178,7 +179,7 @@ static void drawView()
         fix32 dy = fix32Div(fix32Sub(pright_y, pleft_y), FIX32(screen_width));
 
         //Raster line and draw a vertical line for each segment
-        for (u16 i = 0; i < screen_width; i++)
+        for (u16 i = 0; i < screen_width; i+=2)
         {
             s16 idx_x = fix32ToInt(pleft_x);
             while(idx_x < 0)
@@ -189,7 +190,7 @@ static void drawView()
                 idx_y += 1024;
             idx_y %= 1024;
             fix32 heightmap = intToFix32(depth.pixel_data[depth.bytes_per_pixel*(depth.width*idx_y + idx_x)]);
-            fix32 height_on_screen = fix32Mul( fix32Div( fix32Sub(height, heightmap) , z ) , scale_height) + horizon;
+            fix32 height_on_screen = fix32Mul( fix32Div( fix32Sub(height, heightmap) , z ), scale_height) + horizon;
 
             //DrawVerticalLine(i, height_on_screen, ybuffer[i], colormap[pleft.x, pleft.y])
 
@@ -198,10 +199,23 @@ static void drawView()
 
             if (height_on_screen < ybuffer[i])
             {
-                u8 color = random()%8;
-                color = bmp_color.image[1024 * idx_y + idx_x];
-                Line l = {{i, fix32ToInt(height_on_screen)}, {i, fix32ToInt(ybuffer[i])}, color};
+                u8 color = bmp_color.image[512 * idx_y + (idx_x/2)];
+                u16 start_y = fix32ToInt(height_on_screen);
+                u16 end_y = fix32ToInt(ybuffer[i]);
+                u8 * coladdr = BMP_getWritePointer(i, start_y);
+                for(u16 curr_y = start_y; curr_y < end_y; curr_y++)
+                {
+                    *coladdr = color;
+                    color = (color >> 4) + ((color & 0xf) << 4);
+                    coladdr += BMP_PITCH;
+                }
+                /*
+                Line l = {{i, fix32ToInt(height_on_screen)}, {i, fix32ToInt(ybuffer[i])}, color & 0xf};
                 BMP_drawLine(&l);
+                Line l2 = {{i+1, fix32ToInt(height_on_screen)}, {i+2, fix32ToInt(ybuffer[i])}, color>>4};
+                BMP_drawLine(&l2);
+                */
+
                 ybuffer[i] = height_on_screen;
             }
             pleft_x += dx;
@@ -210,6 +224,6 @@ static void drawView()
 
         // Go to next line and increase step size when you are far away
         z += dz;
-        dz += FIX32(0.2);
+        dz += FIX32(0.75);
     }
 }
