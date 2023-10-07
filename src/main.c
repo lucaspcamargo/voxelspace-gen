@@ -15,7 +15,7 @@ fix32 px = FIX32(512);
 fix32 py = FIX32(512);
 u16 phi = 0;
 fix32 height = FIX32(50);
-fix32 horizon = FIX32(60);
+fix32 horizon = FIX32(40);
 static const u16 screen_width = BMP_WIDTH;
 static const u16 screen_height = BMP_HEIGHT;
 static const fix32 screen_width_inv = FIX32(1.0 / (BMP_WIDTH));
@@ -73,6 +73,20 @@ int main(bool hard)
     }
 }
 
+static void heightAdjust()
+{
+    s16 idx_x = fix32ToInt(px);
+    while(idx_x < 0)
+        idx_x += 1024;
+    idx_x %= 1024;
+    s16 idx_y = fix32ToInt(py);
+    while(idx_y < 0)
+        idx_y += 1024;
+    idx_y %= 1024;
+    fix32 heightmap = intToFix32(depth.pixel_data[depth.bytes_per_pixel*(depth.width*idx_y + idx_x)]);
+    height = heightmap + FIX32(30);
+}
+
 static void handleInput()
 {
     u16 value;
@@ -96,6 +110,7 @@ static void handleInput()
             fix32 cosphi = cosFix32(phi);
             px += fix32Mul(FIX32(10), cosphi);
             py -= fix32Mul(FIX32(10), sinphi);
+            heightAdjust();
         }
         if (value & BUTTON_DOWN)
         {
@@ -103,6 +118,7 @@ static void handleInput()
             fix32 cosphi = cosFix32(phi);
             px -= fix32Mul(FIX32(10), cosphi);
             py += fix32Mul(FIX32(10), sinphi);
+            heightAdjust();
         }
         if (value & BUTTON_LEFT)
         {
@@ -154,8 +170,9 @@ static void drawView()
     fix32 scale_height = FIX32(100);
     fix32 distance = FIX32(200);
 
-    fix32 sinphi = sinFix32(phi);
-    fix32 cosphi = cosFix32(phi);
+    u16 adjphi = (phi + 256 + 512)%1024;
+    fix32 sinphi = sinFix32(adjphi);
+    fix32 cosphi = cosFix32(adjphi);
 
     fix32 ybuffer[screen_width];
     for(u16 i = 0; i < screen_width; i++)
@@ -175,8 +192,8 @@ static void drawView()
         fix32 pright_y = fix32Sub(fix32Neg(fix32Mul(sinphi, z)), fix32Mul(cosphi, z)) + py;
 
         // segment the line
-        fix32 dx = fix32Div(fix32Sub(pright_x, pleft_x), FIX32(screen_width));
-        fix32 dy = fix32Div(fix32Sub(pright_y, pleft_y), FIX32(screen_width));
+        fix32 dx = fix32Div(fix32Sub(pright_x, pleft_x)*2, FIX32(screen_width));
+        fix32 dy = fix32Div(fix32Sub(pright_y, pleft_y)*2, FIX32(screen_width));
 
         //Raster line and draw a vertical line for each segment
         for (u16 i = 0; i < screen_width; i+=2)
@@ -191,8 +208,6 @@ static void drawView()
             idx_y %= 1024;
             fix32 heightmap = intToFix32(depth.pixel_data[depth.bytes_per_pixel*(depth.width*idx_y + idx_x)]);
             fix32 height_on_screen = fix32Mul( fix32Div( fix32Sub(height, heightmap) , z ), scale_height) + horizon;
-
-            //DrawVerticalLine(i, height_on_screen, ybuffer[i], colormap[pleft.x, pleft.y])
 
             if(height_on_screen < 0)
                 height_on_screen = 0;
@@ -209,12 +224,6 @@ static void drawView()
                     color = (color >> 4) + ((color & 0xf) << 4);
                     coladdr += BMP_PITCH;
                 }
-                /*
-                Line l = {{i, fix32ToInt(height_on_screen)}, {i, fix32ToInt(ybuffer[i])}, color & 0xf};
-                BMP_drawLine(&l);
-                Line l2 = {{i+1, fix32ToInt(height_on_screen)}, {i+2, fix32ToInt(ybuffer[i])}, color>>4};
-                BMP_drawLine(&l2);
-                */
 
                 ybuffer[i] = height_on_screen;
             }
