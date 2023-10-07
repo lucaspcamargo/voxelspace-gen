@@ -14,6 +14,8 @@ static void drawView();
 fix32 px = FIX32(512);
 fix32 py = FIX32(512);
 u16 phi = 0;
+fix32 height = FIX32(50);
+fix32 horizon = FIX32(60);
 
 
 int main(bool hard)
@@ -146,8 +148,6 @@ static void joyEvent(u16 joy, u16 changed, u16 state)
 
 static void drawView()
 {
-    fix32 height = FIX32(50);
-    fix32 horizon = FIX32(60);
     fix32 scale_height = FIX32(120);
     fix32 distance = FIX32(300);
     static const u16 screen_width = BMP_WIDTH;
@@ -180,8 +180,14 @@ static void drawView()
         //Raster line and draw a vertical line for each segment
         for (u16 i = 0; i < screen_width; i++)
         {
-            u16 idx_x = fix32ToInt(pleft_x)%1024;
-            u16 idx_y = fix32ToInt(pleft_y)%1024;
+            s16 idx_x = fix32ToInt(pleft_x);
+            while(idx_x < 0)
+                idx_x += 1024;
+            idx_x %= 1024;
+            s16 idx_y = fix32ToInt(pleft_y);
+            while(idx_y < 0)
+                idx_y += 1024;
+            idx_y %= 1024;
             fix32 heightmap = intToFix32(depth.pixel_data[depth.bytes_per_pixel*(depth.width*idx_y + idx_x)]);
             fix32 height_on_screen = fix32Mul( fix32Div( fix32Sub(height, heightmap) , z ) , scale_height) + horizon;
 
