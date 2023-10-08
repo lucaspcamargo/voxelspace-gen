@@ -66,7 +66,7 @@ int main(bool hard)
     PAL_setColor(0, bmp_color.palette->data[0]);
     PAL_setPalette(PAL1, bmp_color.palette->data, DMA);
 
-    XGM_startPlay(bgm);
+    //XGM_startPlay(bgm);
 
     /* Do main job here */
     while(1)
