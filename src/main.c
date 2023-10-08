@@ -14,6 +14,7 @@ static void drawView();
 fix32 px = FIX32(512);
 fix32 py = FIX32(512);
 u16 phi = 0;
+u8 phi_step = 0;
 u16 height = HEIGHT_OFFSET;
 fix32 horizon = FIX32(50);
 static const u16 screen_width = BMP_WIDTH;
@@ -29,35 +30,23 @@ const fix32 *z_values = ((const fix32 *) z_values_bin);
 const s16 *div_z_values = ((const s16 *) div_z_values_bin);
 u8 z_count;
 
+u16 color_lut[512];
+void precalc_dither() {
+
+    for(int i = 0; i <256; i++) {
+        u8 dcolor = (i >> 4) + ((i & 0xf) << 4);
+        u8 color = i;
+        color_lut[(i<<1)] = (color<<8)|color;
+        color_lut[(i<<1)+1] = (dcolor<<8)|dcolor;
+    }
+}
+
+
 int main(bool hard)
 {
+    precalc_dither();
     char col;
 
-    // init z div table
-    /*  NOW PRECOMPUTED :)
-    u8 i;
-    fix32 z = Z_INITIAL;
-    fix32 z_step = Z_STEP_INITIAL;
-    for(i = 0; (i < Z_COUNT_MAX) && (z < Z_MAX); i++)
-    {
-        z_values[i] = z;
-        z += z_step;
-        z_step += Z_STEP_INCR;
-        for(u16 h = 0; h < (256 >> (HEIGHT_DIV_SHIFT-1)); h++)
-        {
-            // min height is HEIGHT_OFFSET
-            // max height is 255 + HEIGHT_OFFSET
-            // min heightmap is 0
-            // max heightmap is 255
-            // original value to divide by z is height - heightmap
-            // so values range from -(255-height_offset) to 255+HEIGHT_OFFSET
-            // so from -255 to 255 is the range, if we factor out HEIGHT_OFFSET being added
-            // let's use -256 as the minimum for optimization
-            div_z_values[ i*Z_COUNT_MAX + h ] = fix32Div(  intToFix32(-256 + HEIGHT_OFFSET + (h << HEIGHT_DIV_SHIFT)), z );
-        }
-    }
-    z_count = i;
-    */
 
     z_count = sizeof(z_values_bin)/sizeof(fix32);
     heightAdjust();
@@ -77,7 +66,7 @@ int main(bool hard)
     PAL_setColor(0, bmp_color.palette->data[0]);
     PAL_setPalette(PAL1, bmp_color.palette->data, DMA);
 
-    XGM_startPlay(bgm);
+    //XGM_startPlay(bgm);
 
     /* Do main job here */
     while(1)
@@ -148,14 +137,20 @@ static void handleInput()
         }
         if (value & BUTTON_LEFT)
         {
-            phi = (phi+20) % 1024;
+            phi = (phi+16);
+            phi &= 1023;
+            if(phi_step == 63) { phi_step = 0; } else { phi_step++; }
         }
         if (value & BUTTON_RIGHT)
         {
-            phi = (phi+1024-20) % 1024;
+            phi = (phi+1024-16);
+            phi &= 1023;
+            if(phi_step == 0) { phi_step = 63; } else { phi_step--; }
         }
     }
 }
+
+// 
 
 
 static void joyEvent(u16 joy, u16 changed, u16 state)
@@ -194,9 +189,13 @@ static void joyEvent(u16 joy, u16 changed, u16 state)
 static void drawView()
 {
 
-    u16 adjphi = (phi + 256 + 512)%1024;
-    fix32 sinphi = sinFix32(adjphi);
-    fix32 cosphi = cosFix32(adjphi);
+    f32* step_values_f32 = (f32*)step_values;
+
+    // there are 32 steps but also 4 values in each step
+    // so we need to skip by 128! 
+    // there are 32 z steps for each phi (angle), and each of those have 4 values, so scale by 128 here
+    // which is a shift of 7
+    f32* phi_step_values = &(step_values_f32[phi_step<<7]); 
 
     s16 ybuffer[screen_width];
     for(u16 i = 0; i < screen_width; i++)
@@ -209,56 +208,86 @@ static void drawView()
     {
         const fix32 z = z_values[zidx];
 
-        // Find line on map. This calculation corresponds to a field of view of 90°
-        fix32 pleft_x = fix32Sub(fix32Neg(fix32Mul(cosphi, z)), fix32Mul(sinphi,z)) + px;
-        fix32 pleft_y = fix32Sub( fix32Mul(sinphi, z), fix32Mul(cosphi, z)) + py;
-        fix32 pright_x = fix32Sub( fix32Mul(cosphi, z), fix32Mul(sinphi, z)) + px;
-        fix32 pright_y = fix32Sub(fix32Neg(fix32Mul(sinphi, z)), fix32Mul(cosphi, z)) + py;
+        f32 pleft_x = px;
+        f32 pleft_y = py;
+        pleft_x += *phi_step_values++;
+        pleft_y += *phi_step_values++;
+        f32 dx = *phi_step_values++;
+        f32 dy = *phi_step_values++;
 
-        // segment the line
-        //fix32 dx = fix32Div(fix32Sub(pright_x, pleft_x)*2, FIX32(screen_width));
-        //fix32 dy = fix32Div(fix32Sub(pright_y, pleft_y)*2, FIX32(screen_width));
-        fix32 dx = fix32Sub(pright_x, pleft_x) >> 6;  // optimized
-        fix32 dy = fix32Sub(pright_y, pleft_y) >> 6;  // optimized
+
+        s16* div_z_ptr = &div_z_values[(zidx * (512>>HEIGHT_DIV_SHIFT))];
 
         //Raster line and draw a vertical line for each segment
         for (u16 i = 0; i < screen_width; i+=4)
         {
-            s16 idx_x = fix32ToInt(pleft_x);
-            while(idx_x < 0)
-                idx_x += 1024;
-            idx_x %= 1024;
-            s16 idx_y = fix32ToInt(pleft_y);
-            while(idx_y < 0)
-                idx_y += 1024;
-            idx_y %= 1024;
-            s16 heightmap = depth_bin[1024*idx_y + idx_x];
+            s16 idx_x = pleft_x >> FIX32_FRAC_BITS;
+            idx_x &= 1023;
 
-            // without div table
-            // s16 height_on_screen = fix32ToInt( fix32Mul( fix32Div( intToFix32(((s16)height) - heightmap) , z ), FIX32(HEIGHT_SCALE)) + horizon );
+            // pleft_y is already scaled by 10 (fix32s have 10 decimal bits)
+            // and we need to scale by 1024 to access depth_bin (which is a shift of 10)
+            // so just mask off the lower 10 bits here, keeping 10 bits above that
+            s32 idx_y_scaled = (pleft_y & (1023<<10));
 
-            // with div table
-            s16 rel_height = ((s16)height) - HEIGHT_OFFSET - heightmap; // ranges from -255 to 255
-            u16 value_idx = (zidx * (512>>HEIGHT_DIV_SHIFT)) + ((rel_height + 256) >> HEIGHT_DIV_SHIFT);
-            s16 height_on_screen = div_z_values[value_idx];
+            s16 height_val = depth_bin[idx_y_scaled+idx_x];
 
-            if(height_on_screen < 0)
+
+            s16 rel_height = ((s16)height) - HEIGHT_OFFSET - height_val; // ranges from -255 to 255
+            //u16 value_idx = ((rel_height + 256) >> HEIGHT_DIV_SHIFT);
+            s16 height_on_screen = div_z_ptr[(rel_height + 256) >> HEIGHT_DIV_SHIFT];
+
+            if(height_on_screen < 0) {
                 height_on_screen = 0;
+            }
 
             if (height_on_screen < ybuffer[i])
             {
-                u8 color = bmp_color.image[512 * idx_y + (idx_x/2)];
-                const u16 start_y = height_on_screen;
-                const u16 end_y = ybuffer[i];
-                u8 * coladdr = BMP_getWritePointer(i, start_y);
-                for(u16 curr_y = start_y; curr_y < end_y; curr_y++)
-                {
-                    *coladdr = color;
-                    *(coladdr+1) = color;
-                    color = (color >> 4) + ((color & 0xf) << 4);
-                    coladdr += BMP_PITCH;
-                }
+                u8 color = bmp_color.image[(idx_y_scaled>>1) + (idx_x>>1)];
+                u16 wcolor = color_lut[(color<<1)];
+                u16 wdcolor = color_lut[(color<<1)+1];
 
+                const u16 start_y = height_on_screen;
+
+                u32 dy = ybuffer[i] - start_y;
+                u8 * coladdr = BMP_getWritePointer(i, start_y);
+                u16* wcol_ptr = coladdr;
+
+                if(dy&1) {
+                    *wcol_ptr = wcolor;
+                    SWAP_u16(wcolor, wdcolor);
+                    wcol_ptr += (BMP_PITCH>>1);
+                }
+                dy>>=1;
+
+
+                u32 inc = 256;
+                u16 jump_rows = 80-dy;
+                u32 bytes_to_skip = (jump_rows * 8);
+
+
+                // use a fully unrolled jump table here
+                // each iteration writes 2 words, which is 8 pixels
+                // 28 cycles per 8 pixels
+
+                // the framebuffer is row major, so each next row is 128 bytes past the next
+                // which means that if we have to do 80 iterations of this, we have to skip past a signed 32-bit offset
+                // which means we cannot just have hard coded offsets here
+
+                // a column-major framebuffer would allow faster column filling (~1.25 cycles per pixel, 10 cycles per 8 pixels!)
+                // and also DMA blitting to VRAM
+                __asm volatile(
+                    "jmp code_table_%=(%%pc, %4.l)\t\n\
+                    code_table_%=:\t\n\
+                    .rept 80\t\n\
+                    move.w %1, (%0)\t\n\
+                    move.w %2, 128(%0)\t\n\
+                    add.l %3, %0\t\n\
+                    .endr\t\n\
+                    "
+                    : "+&a" (wcol_ptr)
+                    : "d" (wcolor), "d" (wdcolor), "d" (inc), "d" (bytes_to_skip)
+                );
+               
                 ybuffer[i] = height_on_screen;
             }
             pleft_x += dx;
